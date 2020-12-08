@@ -14,6 +14,18 @@ from python_speech_features import logfbank, fbank, mfcc
 from tqdm import tqdm
 from shutil import copyfile
 
+# define util funcs
+def featExtractWriter(wavPath, cmn=True):
+    y, sr = af.read(wavPath)
+    featMfcc = mfcc(y, sr, winfunc=np.hamming, **kwargs)
+    featLogfbank = logfbank(y, sr, **kwargs)
+    featFbank = fbank(y, sr, winfunc=np.hamming, **kwargs)[0]
+    if cmn:
+        featMfcc -= np.mean(featMfcc, axis=0, keepdims=True)
+        featLogfbank -= np.mean(featLogfbank, axis=0, keepdims=True)
+        featFbank -= np.mean(featFbank, axis=0, keepdims=True)        
+    return (featMfcc,featLogfbank,featFbank)
+
 def parse_args():
     desc="parse args"
     parser = argparse.ArgumentParser(description=desc)
@@ -43,6 +55,17 @@ if not os.path.isdir(train_h5):
     os.mkdir(train_h5)
 if not os.path.isdir(val_h5):
     os.mkdir(val_h5)
+
+# kwargs for feat extraction
+kwargs = {
+            "winlen": 0.025,
+            "winstep": 0.01,
+            "nfilt": 256,
+            "nfft": 2048,
+            "lowfreq": 50,
+            "highfreq": 11000,
+            "preemph": 0.97
+        }
 
 # first load the model
 import keras
@@ -126,14 +149,15 @@ def trimmer(clipIn, sampleRate, segLen, clipOut, win_shift):
         label += 1
         frameStart += frameWin
         frameEnd = frameStart + frameLen    
+# build sox transformer
+tfm = sox.Transformer()
+tfm.set_output_format(file_type='wav', rate=44100, channels=1)
 
 for bird in tqdm(birds_25, desc="processing"):
     sess = ['train/','val/']
     for s in sess:
         bird_dir = data_dir+s+bird+'/'
         bird_clips = [bird_dir+x for x in os.listdir(bird_dir)]
-        tfm = sox.Transformer()
-        tfm.set_output_format(file_type='wav', rate=44100, channels=1)
         # transform data to dealable
         noise_count = 0
         for clip in tqdm(bird_clips,desc="processing %s %s"%(bird, s[:-1])):
@@ -166,26 +190,6 @@ for bird in tqdm(birds_25, desc="processing"):
             all_segs = [audio_out + x for x in os.listdir(audio_out)]
             # finished audio trimming
             # start extracting features
-            kwargs = {
-                "winlen": 0.025,
-                "winstep": 0.01,
-                "nfilt": 256,
-                "nfft": 2048,
-                "lowfreq": 50,
-                "highfreq": 11000,
-                "preemph": 0.97
-            }
-            # !!to-do take tool functions out of loop
-            def featExtractWriter(wavPath, cmn=True):
-                y, sr = af.read(wavPath)
-                featMfcc = mfcc(y, sr, winfunc=np.hamming, **kwargs)
-                featLogfbank = logfbank(y, sr, **kwargs)
-                featFbank = fbank(y, sr, winfunc=np.hamming, **kwargs)[0]
-                if cmn:
-                    featMfcc -= np.mean(featMfcc, axis=0, keepdims=True)
-                    featLogfbank -= np.mean(featLogfbank, axis=0, keepdims=True)
-                    featFbank -= np.mean(featFbank, axis=0, keepdims=True)        
-                return (featMfcc,featLogfbank,featFbank)
             
             for song in tmp_all_segs:
                 song_name = song.split('/')[-1]
@@ -199,4 +203,6 @@ for bird in tqdm(birds_25, desc="processing"):
                     continue
                 hf = h5py.File(h5_out_path,'w')
                 hf.create_dataset('logfbank', data=featLogfbank)
+                hf.create_dataset('fbank', data=featFbank)
+                hf.create_dataset('mfcc', data=featMfcc)
         print('... %s %s extraction finished ...\n... %d noises detected ...'%(s[:-1],bird,noise_count))
