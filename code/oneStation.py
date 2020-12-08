@@ -4,7 +4,7 @@ import pandas as pd
 import argparse
 import sys
 import sox
-import random
+from random import shuffle
 from scipy.io import wavfile
 import soundfile as sf
 import audiofile as af
@@ -28,10 +28,10 @@ def parse_args():
 args = parse_args()
 gpuid = args.gpuid
 data_dir = args.data
-output_dir = args.output
+output_dir = args.out
 segLen = args.segLen
 win_shift = args.winShift
-noise_thres = args.noise_thres
+noise_thres = args.noiseThres
 if not os.path.isdir(output_dir+'train'):
     os.mkdir(output_dir+'train')
 if not os.path.isdir(output_dir+'val'):
@@ -127,15 +127,16 @@ def trimmer(clipIn, sampleRate, segLen, clipOut, win_shift):
         frameStart += frameWin
         frameEnd = frameStart + frameLen    
 
-for bird in tqdm(birds_25, desc='processing'):
+for bird in tqdm(birds_25, desc="processing"):
     sess = ['train/','val/']
     for s in sess:
-        bird_dir = data_dir+sess+bird+'/'
+        bird_dir = data_dir+s+bird+'/'
         bird_clips = [bird_dir+x for x in os.listdir(bird_dir)]
         tfm = sox.Transformer()
         tfm.set_output_format(file_type='wav', rate=44100, channels=1)
         # transform data to dealable
-        for clip in bird_clips:
+        noise_count = 0
+        for clip in tqdm(bird_clips,desc="processing %s %s"%(bird, s[:-1])):
             clip_name = clip.split('/')[-1]
             if not os.path.isdir(storage_dir+bird):
                 os.mkdir(storage_dir+bird)
@@ -147,7 +148,7 @@ for bird in tqdm(birds_25, desc='processing'):
             # check whether segment or not
             audio_length = sox.file_info.duration(audio)
             if audio_length > segLen:
-                audio_out = output_dir + sess + bird + '/'
+                audio_out = output_dir + s + bird + '/'
                 if not os.path.isdir(audio_out):
                     os.mkdir(audio_out)
                 trimmer(audio, 44100, segLen, audio_out, win_shift)
@@ -161,6 +162,7 @@ for bird in tqdm(birds_25, desc='processing'):
                 predProb = modelTest.predict(segSpec)[0][0] 
                 if predProb < noise_thres:
                     os.remove(seg)
+                    noise_count += 1
             all_segs = [audio_out + x for x in os.listdir(audio_out)]
             # finished audio trimming
             # start extracting features
@@ -191,7 +193,10 @@ for bird in tqdm(birds_25, desc='processing'):
                 if not os.path.isdir(save_dir):
                     os.mkdir(save_dir)
                 h5_out_path = save_dir+song_name+'.h5'
-                featMfcc, featLogfbank, featFbank = featExtractWriter(song)
+                try:
+                    featMfcc, featLogfbank, featFbank = featExtractWriter(song)
+                except:
+                    continue
                 hf = h5py.File(h5_out_path,'w')
                 hf.create_dataset('logfbank', data=featLogfbank)
-            print('... %s extraction finished ...'%bird)
+        print('... %s %s extraction finished ...\n... %d noises detected ...'%(s[:-1],bird,noise_count))
