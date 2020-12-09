@@ -18,10 +18,12 @@ def parse_args():
 
 def mix_songs(song_list, cmn=True):
     n = len(song_list)
-    mixed_signal = np.zeros(220500)
     wts = np.random.dirichlet(np.ones(n),size=1)[0]
     for i in range(n):
         song, sr = af.read(song_list[i])
+        if i==0:
+            mixed_signal = song*wts[i]
+            continue
         mixed_signal += song*wts[i]
     if cmn:
         mixed_signal -= np.mean(mixed_signal,axis=0, keepdims=True)
